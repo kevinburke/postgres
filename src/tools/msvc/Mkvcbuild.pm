@@ -137,6 +137,12 @@ sub mkvcbuild
 		push(@pgcommonallfiles, 'hmac_openssl.c');
 		push(@pgcommonallfiles, 'protocol_openssl.c');
 	}
+	elsif ($solution->{options}->{nss})
+	{
+		push(@pgcommonallfiles, 'cryptohash_nss.c');
+		push(@pgcommonallfiles, 'cipher_nss.c');
+		push(@pgcommonallfiles, 'protocol_nss.c');
+	}
 	else
 	{
 		push(@pgcommonallfiles, 'cryptohash.c');
@@ -202,11 +208,18 @@ sub mkvcbuild
 	$postgres->FullExportDLL('postgres.lib');
 
 	# The OBJS scraper doesn't know about ifdefs, so remove appropriate files
-	# if building without OpenSSL.
-	if (!$solution->{options}->{openssl})
+	# if building without various options.
+	if (!$solution->{options}->{openssl} && !$solution->{options}->{nss})
 	{
 		$postgres->RemoveFile('src/backend/libpq/be-secure-common.c');
+	}
+	if (!$solution->{options}->{openssl})
+	{
 		$postgres->RemoveFile('src/backend/libpq/be-secure-openssl.c');
+	}
+	if (!$solution->{options}->{nss})
+	{
+		$postgres->RemoveFile('src/backend/libpq/be-secure-nss.c');
 	}
 	if (!$solution->{options}->{gss})
 	{
@@ -265,11 +278,18 @@ sub mkvcbuild
 	$libpq->AddReference($libpgcommon, $libpgport);
 
 	# The OBJS scraper doesn't know about ifdefs, so remove appropriate files
-	# if building without OpenSSL.
-	if (!$solution->{options}->{openssl})
+	# if building without various options
+	if (!$solution->{options}->{openssl} && !$solution->{options}->{nss})
 	{
 		$libpq->RemoveFile('src/interfaces/libpq/fe-secure-common.c');
+	}
+	if (!$solution->{options}->{openssl})
+	{
 		$libpq->RemoveFile('src/interfaces/libpq/fe-secure-openssl.c');
+	}
+	if (!$solution->{options}->{nss})
+	{
+		$libpq->RemoveFile('src/interfaces/libpq/fe-secure-nss.c');
 	}
 	if (!$solution->{options}->{gss})
 	{
@@ -442,6 +462,11 @@ sub mkvcbuild
 		push @contrib_excludes, 'xml2';
 	}
 
+	if (!$solution->{options}->{openssl} && !$solution->{options}->{nss})
+	{
+		push @contrib_excludes, 'sslinfo';
+	}
+
 	if (!$solution->{options}->{openssl})
 	{
 		push @contrib_excludes, 'sslinfo', 'ssl_passphrase_callback', 'pgcrypto';
@@ -451,6 +476,46 @@ sub mkvcbuild
 	{
 		push @contrib_excludes, 'uuid-ossp';
 	}
+
+	# AddProject() does not recognize the constructs used to populate OBJS in
+	# the pgcrypto Makefile, so it will discover no files.
+	my $pgcrypto =
+	  $solution->AddProject('pgcrypto', 'dll', 'crypto', 'contrib/pgcrypto');
+	$pgcrypto->AddFiles(
+		'contrib/pgcrypto', 'pgcrypto.c',
+		'px.c',             'px-hmac.c',
+		'px-crypt.c',       'crypt-gensalt.c',
+		'crypt-blowfish.c', 'crypt-des.c',
+		'crypt-md5.c',      'mbuf.c',
+		'pgp.c',            'pgp-armor.c',
+		'pgp-cfb.c',        'pgp-compress.c',
+		'pgp-decrypt.c',    'pgp-encrypt.c',
+		'pgp-info.c',       'pgp-mpi.c',
+		'pgp-pubdec.c',     'pgp-pubenc.c',
+		'pgp-pubkey.c',     'pgp-s2k.c',
+		'pgp-pgsql.c');
+	if ($solution->{options}->{openssl})
+	{
+		$pgcrypto->AddFiles('contrib/pgcrypto', 'openssl.c',
+			'pgp-mpi-openssl.c');
+	}
+	elsif ($solution->{options}->{nss})
+	{
+		$pgcrypto->AddFiles('contrib/pgcrypto', 'nss.c',
+			'pgp-mpi-internal.c', 'imath.c', 'blf.c');
+	}
+	else
+	{
+		$pgcrypto->AddFiles(
+			'contrib/pgcrypto', 'internal.c',
+			'internal-sha2.c',  'blf.c',
+			'rijndael.c',       'pgp-mpi-internal.c',
+			'imath.c');
+	}
+	$pgcrypto->AddReference($postgres);
+	$pgcrypto->AddLibrary('ws2_32.lib');
+	my $mf = Project::read_file('contrib/pgcrypto/Makefile');
+	GenerateContribSqlFiles('pgcrypto', $mf);
 
 	foreach my $subdir ('contrib', 'src/test/modules')
 	{
