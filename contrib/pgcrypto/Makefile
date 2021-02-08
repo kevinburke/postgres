@@ -3,6 +3,18 @@
 ZLIB_TST = pgp-compression
 ZLIB_OFF_TST = pgp-zlib-DISABLED
 
+INT_SRCS = internal.c internal-sha2.c blf.c rijndael.c \
+		pgp-mpi-internal.c imath.c
+INT_TESTS = sha2
+
+OSSL_SRCS = openssl.c pgp-mpi-openssl.c
+OSSL_TESTS = sha2 des 3des cast5
+
+NSS_SRCS = nss.c pgp-mpi-internal.c imath.c blf.c
+NSS_TESTS = sha2 des 3des
+
+CF_SRCS = $(if $(findstring openssl, $(with_ssl)), $(OSSL_SRCS), $(if $(findstring nss, $(with_ssl)), $(NSS_SRCS), $(INT_SRCS)))
+CF_TESTS = $(if $(findstring openssl, $(with_ssl)), $(OSSL_TESTS), $(if $(findstring nss, $(with_ssl)), $(NSS_TESTS), $(INT_TESTS)))
 CF_PGP_TESTS = $(if $(subst no,,$(with_zlib)), $(ZLIB_TST), $(ZLIB_OFF_TST))
 
 OBJS = \
