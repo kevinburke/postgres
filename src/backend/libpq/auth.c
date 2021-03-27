@@ -2801,7 +2801,13 @@ CheckCertAuth(Port *port)
 {
 	int			status_check_usermap = STATUS_ERROR;
 
+#if defined(USE_OPENSSL)
 	Assert(port->ssl);
+#elif defined(USE_NSS)
+	Assert(port->pr_fd);
+#else
+	Assert(false);
+#endif
 
 	/* Make sure we have received a username in the certificate */
 	if (port->peer_cn == NULL ||
