@@ -27,13 +27,13 @@ if ($ENV{with_ssl} eq 'openssl')
 	# Determine whether build supports tls-server-end-point.
 	$supports_tls_server_end_point =
 		check_pg_config("#define HAVE_X509_GET_SIGNATURE_NID 1");
-	plan tests => $supports_tls_server_end_point ? 11 : 12;
+	plan tests => 15;
 }
 elsif ($ENV{with_ssl} eq 'nss')
 {
 	$nss = 1;
 	$supports_tls_server_end_point = 1;
-	plan tests => 11;
+	plan tests => 15;
 }
 else
 {
