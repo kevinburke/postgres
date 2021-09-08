@@ -670,8 +670,9 @@ retry3:
 		return 1;
 	}
 
-	if (someread)
+	if (someread) {
 		return 1;				/* got a zero read after successful tries */
+    }
 
 	/*
 	 * A return value of 0 could mean just that no data is now available, or

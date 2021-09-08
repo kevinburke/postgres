@@ -35,6 +35,12 @@ elsif ($ENV{with_ssl} eq 'nss')
 	$supports_tls_server_end_point = 1;
 	plan tests => 15;
 }
+elsif ($ENV{with_ssl} eq 'rustls')
+{
+	$nss = 1;
+	$supports_tls_server_end_point = 1;
+	plan tests => 15;
+}
 else
 {
 	plan skip_all => 'SSL not supported by this build';

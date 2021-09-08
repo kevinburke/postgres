@@ -26,6 +26,11 @@ elsif ($ENV{with_ssl} eq 'nss')
 	$nss = 1;
 	plan tests => 138;
 }
+elsif ($ENV{with_ssl} eq 'rustls')
+{
+	$nss = 1;
+	plan tests => 138;
+}
 else
 {
 	plan skip_all => 'SSL not supported by this build';
