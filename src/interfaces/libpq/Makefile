@@ -61,6 +61,11 @@ OBJS += \
 	fe-secure-nss.o
 endif
 
+ifeq ($(with_ssl), rustls)
+OBJS += \
+	fe-secure-rustls.o
+endif
+
 ifeq ($(with_gssapi),yes)
 OBJS += \
 	fe-gssapi-common.o \

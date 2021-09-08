@@ -19,10 +19,10 @@ m4_pattern_forbid(^PGAC_)dnl to catch undefined macros
 
 AC_INIT([PostgreSQL], [15devel], [pgsql-bugs@lists.postgresql.org], [], [https://www.postgresql.org/])
 
-m4_if(m4_defn([m4_PACKAGE_VERSION]), [2.69], [], [m4_fatal([Autoconf version 2.69 is required.
-Untested combinations of 'autoconf' and PostgreSQL versions are not
-recommended.  You can remove the check from 'configure.ac' but it is then
-your responsibility whether the result works or not.])])
+#m4_if(m4_defn([m4_PACKAGE_VERSION]), [2.69], [], [m4_fatal([Autoconf version 2.69 is required.
+#Untested combinations of 'autoconf' and PostgreSQL versions are not
+#recommended.  You can remove the check from 'configure.ac' but it is then
+#your responsibility whether the result works or not.])])
 AC_COPYRIGHT([Copyright (c) 1996-2021, PostgreSQL Global Development Group])
 AC_CONFIG_SRCDIR([src/backend/access/common/heaptuple.c])
 AC_CONFIG_AUX_DIR(config)
@@ -1232,9 +1232,10 @@ fi
 #
 # SSL Library
 #
-# There is currently only one supported SSL/TLS library: OpenSSL.
+# There are currently three supported SSL/TLS libraries: OpenSSL, NSS and
+# Rustls.
 #
-PGAC_ARG_REQ(with, ssl, [LIB], [use LIB for SSL/TLS support (openssl, nss)])
+PGAC_ARG_REQ(with, ssl, [LIB], [use LIB for SSL/TLS support (openssl, nss, rustls)])
 if test x"$with_ssl" = x"" ; then
   with_ssl=no
 fi
@@ -1288,6 +1289,39 @@ elif test "$with_ssl" = nss ; then
   AC_CHECK_LIB(nspr4, PR_GetDefaultIOMethods, [], [AC_MSG_ERROR([library 'nspr4' is required for NSS])])
   AC_CHECK_LIB(ssl3, SSL_GetImplementedCiphers, [], [AC_MSG_ERROR([library 'ssl3' is required for NSS])])
   AC_DEFINE([USE_NSS], 1, [Define to 1 if you have NSS support,])
+elif test "$with_ssl" = rustls ; then
+  # For now, bootstrap rustls with NSS until all endpoints are configured.
+  PGAC_PATH_PROGS(NSS_CONFIG, nss-config)
+  PGAC_PATH_PROGS(NSPR_CONFIG, nspr-config)
+  if test -n "$NSS_CONFIG"; then
+    NSS_LIBS=`$NSS_CONFIG --libs`
+	NSS_CFLAGS=`$NSS_CONFIG --cflags`
+  fi
+  if test -n "$NSPR_CONFIG"; then
+	NSPR_LIBS=`$NSPR_CONFIG --libs`
+	NSPR_CFLAGS=`$NSPR_CONFIG --cflags`
+  fi
+
+  LDFLAGS="$LDFLAGS $NSS_LIBS $NSPR_LIBS"
+  CFLAGS="$CFLAGS $NSS_CFLAGS $NSPR_CFLAGS"
+
+  AC_CHECK_LIB(nss3, NSS_InitContext, [], [AC_MSG_ERROR([library 'nss3' is required for NSS])])
+  AC_CHECK_LIB(nspr4, PR_GetDefaultIOMethods, [], [AC_MSG_ERROR([library 'nspr4' is required for NSS])])
+  AC_CHECK_LIB(ssl3, SSL_GetImplementedCiphers, [], [AC_MSG_ERROR([library 'ssl3' is required for NSS])])
+  AC_DEFINE([USE_NSS], 1, [Define to 1 if you have NSS support,])
+
+  AC_CHECK_LIB(crustls, rustls_client_session_read,
+    dnl libcrustls found, set the variable
+    [
+      AC_DEFINE(USE_RUSTLS, 1, [if rustls is enabled])
+      AC_SUBST(USE_RUSTLS, [1])
+      RUSTLS_ENABLED=1
+      USE_RUSTLS="yes"
+      ssl_msg="rustls"
+    ], [], -lpthread -ldl)
+
+  LIBS="-lcrustls -lpthread -ldl $LIBS"
+  AC_DEFINE([USE_RUSTLS], 1, [Define to 1 if you have Rustls support,])
 elif test "$with_ssl" != no ; then
   AC_MSG_ERROR([--with-ssl must specify one of openssl or nss])
 fi
