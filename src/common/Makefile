@@ -92,12 +92,20 @@ OBJS_COMMON += \
 	protocol_nss.o \
 	cryptohash_nss.o
 else
+ifeq ($(with_ssl),rustls)
+OBJS_COMMON += \
+	hmac.o \
+	cipher_nss.o \
+	protocol_nss.o \
+	cryptohash_nss.o
+else
 OBJS_COMMON += \
 	cryptohash.o \
 	hmac.o \
 	md5.o \
 	sha1.o \
 	sha2.o
+endif
 endif
 endif
 

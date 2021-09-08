@@ -85,6 +85,10 @@ typedef struct
 #include "common/nss.h"
 #endif
 
+#ifdef USE_RUSTLS
+#include "crustls.h"
+#endif
+
 /*
  * POSTGRES backend dependent Constants.
  */
@@ -553,6 +557,10 @@ struct pg_conn
 	 */
 	bool		has_password;
 #endif							/* USE_NSS */
+#ifdef USE_RUSTLS
+    rustls_client_config *rustls_config;
+    rustls_connection *rustls_conn;
+#endif
 #endif							/* USE_SSL */
 
 #ifdef ENABLE_GSS
