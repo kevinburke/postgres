@@ -31,10 +31,11 @@ OBJS = \
 
 ifeq ($(with_ssl),openssl)
 OBJS += be-secure-openssl.o
-else
-ifeq ($(with_ssl),nss)
+else ifeq ($(with_ssl),nss)
 OBJS += be-secure-nss.o
-endif
+else ifeq ($(with_ssl),rustls)
+# focus on frontend for now - just continue to use NSS for the backend
+OBJS += be-secure-nss.o # be-secure-rustls.o
 endif
 
 ifeq ($(with_gssapi),yes)
