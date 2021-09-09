@@ -1320,6 +1320,7 @@ elif test "$with_ssl" = rustls ; then
       ssl_msg="rustls"
     ], [], -lpthread -ldl)
 
+  LDFLAGS="$LDFLAGS -lcrustls"
   LIBS="-lcrustls -lpthread -ldl $LIBS"
   AC_DEFINE([USE_RUSTLS], 1, [Define to 1 if you have Rustls support,])
 elif test "$with_ssl" != no ; then

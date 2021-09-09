@@ -13299,6 +13299,7 @@ $as_echo "#define USE_RUSTLS 1" >>confdefs.h
 fi
 
 
+  LDFLAGS="$LDFLAGS -lcrustls"
   LIBS="-lcrustls -lpthread -ldl $LIBS"
 
 $as_echo "#define USE_RUSTLS 1" >>confdefs.h
