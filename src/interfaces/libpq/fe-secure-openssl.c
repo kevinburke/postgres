@@ -175,6 +175,7 @@ rloop:
 	 * ERR_get_error() may be called.
 	 */
 	ecode = (err != SSL_ERROR_NONE || n < 0) ? ERR_get_error() : 0;
+    fprintf(stderr, "pgtls_read %d bytes, got err %d\n", n, ecode)
 	switch (err)
 	{
 		case SSL_ERROR_NONE:
@@ -284,6 +285,7 @@ pgtls_write(PGconn *conn, const void *ptr, size_t len)
 	n = SSL_write(conn->ssl, ptr, len);
 	err = SSL_get_error(conn->ssl, n);
 	ecode = (err != SSL_ERROR_NONE || n < 0) ? ERR_get_error() : 0;
+    fprintf(stderr, "pgtls_write %d bytes, got err %d\n", n, ecode)
 	switch (err)
 	{
 		case SSL_ERROR_NONE:
