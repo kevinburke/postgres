@@ -175,7 +175,7 @@ rloop:
 	 * ERR_get_error() may be called.
 	 */
 	ecode = (err != SSL_ERROR_NONE || n < 0) ? ERR_get_error() : 0;
-    fprintf(stderr, "pgtls_read %d bytes, got err %d\n", n, ecode)
+    fprintf(stderr, "pgtls_read %d bytes, got err %d, ecode %d\n", n, err, ecode);
 	switch (err)
 	{
 		case SSL_ERROR_NONE:
@@ -261,6 +261,7 @@ rloop:
 
 	/* ensure we return the intended errno to caller */
 	SOCK_ERRNO_SET(result_errno);
+    fprintf(stderr, "pgtls_read result errno %d, returned n %d\n", result_errno, n);
 
 	return n;
 }
@@ -268,7 +269,10 @@ rloop:
 bool
 pgtls_read_pending(PGconn *conn)
 {
-	return SSL_pending(conn->ssl) > 0;
+    int pending = SSL_pending(conn->ssl);
+    fprintf(stderr, "pgtls_read_pending %d bytes\n", pending);
+    bool out = pending > 0;
+	return out;
 }
 
 ssize_t
@@ -282,10 +286,17 @@ pgtls_write(PGconn *conn, const void *ptr, size_t len)
 
 	SOCK_ERRNO_SET(0);
 	ERR_clear_error();
+    fprintf(stderr, "pgtls_write wants to write %d bytes\n", len);
+    uint8_t *intptr = ptr;
+    for (int i = 0; i < len; i++) {
+        fprintf(stderr, "%c", *((char *)(ptr + i)));
+    }
+    fprintf(stderr, "\n");
+
 	n = SSL_write(conn->ssl, ptr, len);
 	err = SSL_get_error(conn->ssl, n);
 	ecode = (err != SSL_ERROR_NONE || n < 0) ? ERR_get_error() : 0;
-    fprintf(stderr, "pgtls_write %d bytes, got err %d\n", n, ecode)
+    fprintf(stderr, "pgtls_write %d bytes, got err %d\n", n, ecode);
 	switch (err)
 	{
 		case SSL_ERROR_NONE:
@@ -370,6 +381,7 @@ pgtls_write(PGconn *conn, const void *ptr, size_t len)
 	/* ensure we return the intended errno to caller */
 	SOCK_ERRNO_SET(result_errno);
 
+    fprintf(stderr, "pgtls_write result errno %d, returned n %d\n", result_errno, n);
 	return n;
 }
 
