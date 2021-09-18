@@ -137,7 +137,7 @@ pgtls_open_client(PGconn *conn)
 					fprintf(stderr, "EOF in swrite\n");
 					return PGRES_POLLING_FAILED;
 				}
-				fprintf(stderr, "cr_send wrote %ld bytes to network\n", tlswritten);
+				fprintf(stderr, "rustls_write_tls wrote %ld bytes to network\n", tlswritten);
 			}
 		}
 
@@ -157,7 +157,7 @@ pgtls_open_client(PGconn *conn)
 				return PGRES_POLLING_FAILED;
 			}
 
-			fprintf(stderr, "cr_recv read %ld bytes from the network\n", tls_bytes_read);
+			fprintf(stderr, "rustls_read_tls read %ld bytes from the network\n", tls_bytes_read);
 		}
 	}
 
