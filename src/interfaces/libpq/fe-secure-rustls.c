@@ -41,23 +41,31 @@ pgtls_init_library(bool do_ssl, int do_crypto)
 	/* noop */
 }
 
-	int
+int
 pgtls_init(PGconn *conn, bool do_ssl, bool do_crypto)
 {
 	if (do_ssl) {
-		conn->rustls_config = NULL;
 		conn->ssl_in_use = false;
 	}
 	return 0;
 }
 
-	void
+void
 pgtls_close(PGconn *conn)
 {
-	fprintf(stderr, "call pgtls_close\n");
+	ssize_t n;
+	if (conn->rustls_conn) {
+		rustls_connection_send_close_notify(conn->rustls_conn);
+		n = pgtls_write(conn, NULL, 0);
+		if(n < 0) {
+			// TODO log or return error
+		}
+		rustls_connection_free(conn->rustls_conn);
+		conn->rustls_conn = NULL;
+	}
 }
 
-	PostgresPollingStatusType
+PostgresPollingStatusType
 pgtls_open_client(PGconn *conn)
 {
 	struct rustls_connection *rconn = NULL;
@@ -88,6 +96,7 @@ pgtls_open_client(PGconn *conn)
 	client_config = rustls_client_config_builder_build(config_builder);
 
 	result = rustls_client_connection_new(client_config, conn->connhost[conn->whichhost].host, &rconn);
+	rustls_client_config_free(client_config);
 	if(result != RUSTLS_RESULT_OK) {
 		// TODO log error here.
 		char buf[256];
@@ -127,14 +136,15 @@ pgtls_open_client(PGconn *conn)
 				io_error = rustls_connection_write_tls(rconn, write_cb,
 						conn, &tlswritten);
 				if(io_error == EAGAIN || io_error == EWOULDBLOCK) {
-					fprintf(stderr, "swrite: EAGAIN after %ld bytes\n", tlswritten);
 					continue;
 				} else if(io_error) {
 					fprintf(stderr, "got io_error %d\n", io_error);
+					rustls_connection_free(rconn);
 					return PGRES_POLLING_FAILED;
 				}
 				if(tlswritten == 0) {
 					fprintf(stderr, "EOF in swrite\n");
+					rustls_connection_free(rconn);
 					return PGRES_POLLING_FAILED;
 				}
 				fprintf(stderr, "rustls_write_tls wrote %ld bytes to network\n", tlswritten);
@@ -149,11 +159,13 @@ pgtls_open_client(PGconn *conn)
 				fprintf(stderr, "sread: EAGAIN or EWOULDBLOCK\n");
 			} else if(io_error) {
 				fprintf(stderr, "got io_error %d\n", io_error);
+				rustls_connection_free(rconn);
 				return PGRES_POLLING_FAILED;
 			}
 			rresult = rustls_connection_process_new_packets(rconn);
 			if(rresult != RUSTLS_RESULT_OK) {
 				fprintf(stderr, "error processing new packets: %d\n", rresult);
+				rustls_connection_free(rconn);
 				return PGRES_POLLING_FAILED;
 			}
 
@@ -167,7 +179,7 @@ pgtls_open_client(PGconn *conn)
 	return PGRES_POLLING_OK;
 }
 
-	ssize_t
+ssize_t
 pgtls_read(PGconn *conn, void *ptr, size_t len)
 {
 	int err = 1;

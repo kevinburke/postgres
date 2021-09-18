@@ -558,7 +558,6 @@ struct pg_conn
 	bool		has_password;
 #endif							/* USE_NSS */
 #ifdef USE_RUSTLS
-    rustls_client_config *rustls_config;
     rustls_connection *rustls_conn;
 #endif
 #endif							/* USE_SSL */
