@@ -478,6 +478,7 @@ PQsslAttribute(PGconn *conn, const char *attribute_name)
 	   SSLCipherSuiteInfo suite;
 	   */
 	uint16_t protocol_version;
+    rustls_supported_ciphersuite csuite;
 	fprintf(stderr, "get attribute name %s\n", attribute_name);
 
 	if (!conn || !conn->rustls_conn)
@@ -528,13 +529,17 @@ PQsslAttribute(PGconn *conn, const char *attribute_name)
 		}
 		return pstrdup("unknown");
 	}
-	/*
 
-	 * NSS disabled support for compression in version 3.33, and it was only
-	 * available for SSLv3 at that point anyways, so we can safely return off
-	 * here without even checking.
-	 if (strcmp(attribute_name, "compression") == 0)
-	 return "off";
-	 */
+	if (strcmp(attribute_name, "cipher") == 0) {
+        // https://github.com/rustls/rustls/issues/822
+        // https://github.com/rustls/rustls-ffi/issues/143
+        return pstrdup("unknown");
+    }
+
+    // rustls does not support compression
+	if (strcmp(attribute_name, "compression") == 0) {
+		return "off";
+    }
+
 	return NULL;
 }
