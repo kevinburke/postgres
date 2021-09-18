@@ -147,8 +147,10 @@ termPQExpBuffer(PQExpBuffer str)
 void
 resetPQExpBuffer(PQExpBuffer str)
 {
+	fprintf(stderr, "reset pq exp buffer\n");
 	if (str)
 	{
+		fprintf(stderr, "check str data\n");
 		if (str->data != oom_buffer)
 		{
 			str->len = 0;
@@ -157,6 +159,7 @@ resetPQExpBuffer(PQExpBuffer str)
 		else
 		{
 			/* try to reinitialize to valid state */
+			fprintf(stderr, "call init pq exp buffer\n");
 			initPQExpBuffer(str);
 		}
 	}
@@ -240,6 +243,7 @@ printfPQExpBuffer(PQExpBuffer str, const char *fmt,...)
 	va_list		args;
 	bool		done;
 
+	fprintf(stderr, "in printf pq exp buffer\n");
 	resetPQExpBuffer(str);
 
 	if (PQExpBufferBroken(str))
@@ -299,6 +303,13 @@ appendPQExpBufferVA(PQExpBuffer str, const char *fmt, va_list args)
 	size_t		needed;
 	int			nprinted;
 
+	/*
+	fprintf(stderr, "str: %p\n", str);
+	fprintf(stderr, "str maxlen: %d\n", str->maxlen);
+	fprintf(stderr, "str len: %d\n", str->len);
+	fprintf(stderr, "fmt: %s\n", fmt);
+	fprintf(stderr, "args: %s\n", args);
+	*/
 	/*
 	 * Try to format the given string into the available space; but if there's
 	 * hardly any space, don't bother trying, just enlarge the buffer first.

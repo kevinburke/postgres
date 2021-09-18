@@ -76,6 +76,8 @@ pgtls_open_client(PGconn *conn)
 	rustls_io_result io_error;
 	size_t tlswritten = 0;
 	size_t tls_bytes_read = 0;
+	size_t n = 0;
+	char errorbuf[255];
 	struct rustls_client_config_builder *config_builder;
 	const struct rustls_client_config *client_config = NULL;
 
@@ -84,7 +86,14 @@ pgtls_open_client(PGconn *conn)
 		result = rustls_client_config_builder_load_roots_from_file(
 				config_builder, conn->sslrootcert);
 		if(result != RUSTLS_RESULT_OK) {
-			fprintf(stderr, "failed to load file roots: %d\n", result);
+			/*
+			rustls_error(result, errorbuf, sizeof(errorbuf), &n);
+			fprintf(stderr, "errorbuf contents: %.*s\n", (int)n, errorbuf);
+			fprintf(stderr, "errorbuf contents: %s\n", errorbuf);
+			errorbuf[n+1] = '\0';
+			printfPQExpBuffer(&conn->errorMessage,
+							  "blah blah");
+							  */
 			rustls_client_config_free(
 					rustls_client_config_builder_build(config_builder));
 			return PGRES_POLLING_FAILED;
@@ -310,7 +319,7 @@ read_cb(void *userdata, unsigned char *buf, size_t len, size_t *out_n)
  *
  *     PR_Recv(conn->pr_fd, &c, 1, PR_MSG_PEEK, PR_INTERVAL_NO_WAIT);
  */
-	bool
+bool
 pgtls_read_pending(PGconn *conn)
 {
 	bool out = !rustls_connection_wants_read(conn->rustls_conn);
@@ -322,7 +331,7 @@ pgtls_read_pending(PGconn *conn)
  *		Write data on the secure socket
  *
  */
-	ssize_t
+ssize_t
 pgtls_write(PGconn *conn, const void *ptr, size_t len)
 {
 	size_t		plainwritten = 0;
@@ -334,6 +343,7 @@ pgtls_write(PGconn *conn, const void *ptr, size_t len)
 	/// `rustls_connection_write_tls`.
 	/// On success, store the number of bytes actually written in *out_n
 	/// (this may be less than `count`).
+    fprintf(stderr, "call pgtls_write with len %ld\n", len);
 	if (len > 0) {
 		result = rustls_connection_write(conn->rustls_conn, (uint8_t *)ptr, len, &plainwritten);
 		if(result != RUSTLS_RESULT_OK) {
@@ -467,8 +477,10 @@ PQsslAttribute(PGconn *conn, const char *attribute_name)
 	   SSLChannelInfo channel;
 	   SSLCipherSuiteInfo suite;
 	   */
+	uint16_t protocol_version;
+	fprintf(stderr, "get attribute name %s\n", attribute_name);
 
-	if (!conn || !conn->pr_fd)
+	if (!conn || !conn->rustls_conn)
 		return NULL;
 
 	if (strcmp(attribute_name, "library") == 0)
@@ -495,8 +507,28 @@ PQsslAttribute(PGconn *conn, const char *attribute_name)
 	 return key_bits_str;
 	 }
 
-	 if (strcmp(attribute_name, "protocol") == 0)
-	 return ssl_protocol_version_to_string(channel.protocolVersion);
+	 */
+	if (strcmp(attribute_name, "protocol") == 0) {
+		if (conn->rustls_conn) {
+			protocol_version = rustls_connection_get_protocol_version(conn->rustls_conn);
+			switch (protocol_version) {
+				case RUSTLS_TLS_VERSION_SSLV2:
+					return pstrdup("SSLv2");
+				case RUSTLS_TLS_VERSION_SSLV3:
+					return pstrdup("SSLv3");
+				case RUSTLS_TLS_VERSION_TLSV1_0:
+					return "TLSv1.0";
+				case RUSTLS_TLS_VERSION_TLSV1_1:
+					return "TLSv1.1";
+				case RUSTLS_TLS_VERSION_TLSV1_2:
+					return "TLSv1.2";
+				case RUSTLS_TLS_VERSION_TLSV1_3:
+					return "TLSv1.3";
+			}
+		}
+		return pstrdup("unknown");
+	}
+	/*
 
 	 * NSS disabled support for compression in version 3.33, and it was only
 	 * available for SSLv3 at that point anyways, so we can safely return off
