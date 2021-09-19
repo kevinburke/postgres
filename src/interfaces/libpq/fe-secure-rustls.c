@@ -28,6 +28,14 @@ read_cb(void *userdata, uint8_t *buf, uintptr_t len, uintptr_t *out_n);
 int
 write_cb(void *userdata, const uint8_t *buf, uintptr_t len, uintptr_t *out_n);
 
+#ifdef ENABLE_THREAD_SAFETY
+#ifndef WIN32
+static pthread_mutex_t ssl_config_mutex = PTHREAD_MUTEX_INITIALIZER;
+#else
+static pthread_mutex_t ssl_config_mutex = NULL;
+static long win32_ssl_create_mutex = 0;
+#endif
+#endif							/* ENABLE_THREAD_SAFETY */
 /* ------------------------------------------------------------ */
 /*			 Procedures common to all secure sessions			*/
 /* ------------------------------------------------------------ */
@@ -68,32 +76,38 @@ pgtls_close(PGconn *conn)
 PostgresPollingStatusType
 pgtls_open_client(PGconn *conn)
 {
+	size_t tlswritten = 0;
+	size_t tls_bytes_read = 0;
+	size_t n = 0;
+	char errorbuf[255];
 	struct rustls_connection *rconn = NULL;
 	enum rustls_result result;
 	bool wants_read;
 	bool wants_write;
 	rustls_result rresult = 0;
 	rustls_io_result io_error;
-	size_t tlswritten = 0;
-	size_t tls_bytes_read = 0;
-	size_t n = 0;
-	char errorbuf[255];
 	struct rustls_client_config_builder *config_builder;
 	const struct rustls_client_config *client_config = NULL;
+
+#ifdef ENABLE_THREAD_SAFETY
+	if (pthread_mutex_lock(&ssl_config_mutex))
+	{
+		printfPQExpBuffer(&conn->errorMessage,
+						  libpq_gettext("unable to lock thread"));
+		return PGRES_POLLING_FAILED;
+	}
+#endif
 
 	config_builder = rustls_client_config_builder_new();
 	if (conn->sslrootcert && strlen(conn->sslrootcert) > 0) {
 		result = rustls_client_config_builder_load_roots_from_file(
 				config_builder, conn->sslrootcert);
 		if(result != RUSTLS_RESULT_OK) {
-			/*
 			rustls_error(result, errorbuf, sizeof(errorbuf), &n);
-			fprintf(stderr, "errorbuf contents: %.*s\n", (int)n, errorbuf);
-			fprintf(stderr, "errorbuf contents: %s\n", errorbuf);
 			errorbuf[n+1] = '\0';
-			printfPQExpBuffer(&conn->errorMessage,
-							  "blah blah");
-							  */
+			appendPQExpBuffer(&conn->errorMessage,
+					libpq_gettext("could not load certificates from file %s: %s\n"),
+					conn->sslrootcert, &errorbuf);
 			rustls_client_config_free(
 					rustls_client_config_builder_build(config_builder));
 			return PGRES_POLLING_FAILED;
@@ -117,6 +131,9 @@ pgtls_open_client(PGconn *conn)
 	fprintf(stderr, "created rustls connection\n");
 
 	rustls_connection_set_userdata(rconn, conn);
+#ifdef ENABLE_THREAD_SAFETY
+	pthread_mutex_unlock(&ssl_config_mutex);
+#endif
 
 	/* Read/write data until the handshake is done or the socket would block. */
 	for(;;) {
@@ -410,7 +427,7 @@ pgtls_get_peer_certificate_hash(PGconn *conn, size_t *len)
  *
  * The certificate's Common Name and Subject Alternative Names are considered.
  */
-	int
+int
 pgtls_verify_peer_name_matches_certificate_guts(PGconn *conn,
 		int *names_examined,
 		char **first_name)
@@ -432,29 +449,22 @@ PQgetssl(PGconn *conn)
 	return NULL;
 }
 
-	void *
+void *
 PQsslStruct(PGconn *conn, const char *struct_name)
 {
 	if (!conn)
 		return NULL;
 
-	/*
-	 * Return the underlying PRFileDesc which can be used to access
-	 * information on the connection details. There is no SSL context per se.
-	 */
-
-	/*
-	 * TODO rust specific information
-	 if (strcmp(struct_name, "NSS") == 0)
-	 return conn->pr_fd;
-	 */
+	if (strcmp(struct_name, "rustls") == 0) {
+		return conn->rustls_conn;
+	}
 	return NULL;
 }
 
 /*
- * not sure what this is
+ * Return the list of attributes that are supportedby PQsslAttribute below.
  */
-	const char *const *
+const char *const *
 PQsslAttributeNames(PGconn *conn)
 {
 	static const char *const result[] = {
@@ -469,46 +479,18 @@ PQsslAttributeNames(PGconn *conn)
 	return result;
 }
 
-	const char *
+const char *
 PQsslAttribute(PGconn *conn, const char *attribute_name)
 {
-	/*
-	   SECStatus	status;
-	   SSLChannelInfo channel;
-	   SSLCipherSuiteInfo suite;
-	   */
 	uint16_t protocol_version;
-    rustls_supported_ciphersuite csuite;
-	fprintf(stderr, "get attribute name %s\n", attribute_name);
 
 	if (!conn || !conn->rustls_conn)
 		return NULL;
 
-	if (strcmp(attribute_name, "library") == 0)
+	if (strcmp(attribute_name, "library") == 0) {
 		return "rustls";
+    }
 
-	/*
-	 * TODO
-	 status = SSL_GetChannelInfo(conn->pr_fd, &channel, sizeof(channel));
-	 if (status != SECSuccess)
-	 return NULL;
-
-	 status = SSL_GetCipherSuiteInfo(channel.cipherSuite, &suite, sizeof(suite));
-	 if (status != SECSuccess)
-	 return NULL;
-
-	 if (strcmp(attribute_name, "cipher") == 0)
-	 return suite.cipherSuiteName;
-
-	 if (strcmp(attribute_name, "key_bits") == 0)
-	 {
-	 static char key_bits_str[8];
-
-	 snprintf(key_bits_str, sizeof(key_bits_str), "%i", suite.effectiveKeyBits);
-	 return key_bits_str;
-	 }
-
-	 */
 	if (strcmp(attribute_name, "protocol") == 0) {
 		if (conn->rustls_conn) {
 			protocol_version = rustls_connection_get_protocol_version(conn->rustls_conn);
