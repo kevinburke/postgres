@@ -92,6 +92,7 @@ pgtls_open_client(PGconn *conn)
 #ifdef ENABLE_THREAD_SAFETY
 	if (pthread_mutex_lock(&ssl_config_mutex))
 	{
+		fprintf(stderr, "unable to lock thread\n");
 		printfPQExpBuffer(&conn->errorMessage,
 						  libpq_gettext("unable to lock thread"));
 		return PGRES_POLLING_FAILED;
@@ -128,7 +129,6 @@ pgtls_open_client(PGconn *conn)
 		fprintf(stderr, "could not create connection/handshake: %.*s\n", (int)n, buf);
 		return PGRES_POLLING_FAILED;
 	}
-	fprintf(stderr, "created rustls connection\n");
 
 	rustls_connection_set_userdata(rconn, conn);
 #ifdef ENABLE_THREAD_SAFETY
@@ -145,7 +145,6 @@ pgtls_open_client(PGconn *conn)
 		 * once the handshake is done.
 		 */
 		if(!rustls_connection_is_handshaking(rconn)) {
-			fprintf(stderr, "Done handshaking\n");
 			conn->rustls_conn = rconn;
 			conn->ssl_in_use = true;
 
@@ -212,99 +211,64 @@ pgtls_read(PGconn *conn, void *ptr, size_t len)
 	int result = 1;
 	int n = 0;
 	size_t nbytes = 0;
-	int			read_errno = 0;
-	int			result_errno = 0;
+	int read_errno = 0;
+	int result_errno = 0;
 	size_t plain_bytes_copied = 0;
-	char		sebuf[PG_STRERROR_R_BUFLEN];
+	char errorbuf[255];
+	size_t errorsize = 0;
 
 	fprintf(stderr, "call pgtls_read\n");
+	err = rustls_connection_read_tls(conn->rustls_conn, read_cb, conn, &nbytes);
+	result_errno = SOCK_ERRNO;
+	SOCK_ERRNO_SET(result_errno);
+	if (nbytes < 0) {
+		if (err == EAGAIN || err == EWOULDBLOCK) {
+			/* no error message, caller is expected to retry */
+			fprintf(stderr, "got EAGAIN or EWOULDBLOCK (%d), returning 0 bytes read\n", err);
+			n = 0;
+			return n;
+		} else if(err != 0) {
+			fprintf(stderr, "pgtls_read reading from socket: errno %d\n", err);
+			return (ssize_t) n;
+		}
+	}
+	result = rustls_connection_process_new_packets(conn->rustls_conn);
+	if(result != RUSTLS_RESULT_OK) {
+		rustls_error(result, errorbuf, sizeof(errorbuf), &errorsize);
+		errorbuf[errorsize+1] = '\0';
+		appendPQExpBuffer(&conn->errorMessage,
+				libpq_gettext("could not process packets: %s\n"),
+				&errorbuf);
+		return (ssize_t) n;
+	}
 
-	/*
-	   n = recv(conn->sock, ptr, len, 0);
-	   fprintf(stderr, "recv %d bytes\n", n);
-	   if (n < 0)
-	   {
-	   result_errno = SOCK_ERRNO;
-	   fprintf(stderr, "got errno %d\n", result_errno);
-	// *//* Set error message if appropriate *//*
-	switch (result_errno)
-	{
-#ifdef EAGAIN
-		case EAGAIN:
-#endif
-#if defined(EWOULDBLOCK) && (!defined(EAGAIN) || (EWOULDBLOCK != EAGAIN))
-		case EWOULDBLOCK:
-#endif
-		case EINTR:
-			*//* no error message, caller is expected to retry *//*
-																	break;
+	while (plain_bytes_copied < len) {
+		result = rustls_connection_read(conn->rustls_conn, (uint8_t *)ptr + n,
+				len - n, &nbytes);
+		fprintf(stderr, "rustls_connection_read: read %ld bytes, result %d\n", nbytes, result);
+		if(result == RUSTLS_RESULT_ALERT_CLOSE_NOTIFY) {
+			fprintf(stderr, "Received close_notify, cleanly ending connection\n");
+			return 0;
+		} else if (result != RUSTLS_RESULT_OK) {
+			rustls_error(result, errorbuf, sizeof(errorbuf), &errorsize);
 
-																	case EPIPE:
-																	case ECONNRESET:
-																	appendPQExpBufferStr(&conn->errorMessage,
-																	libpq_gettext("server closed the connection unexpectedly\n"
-																	"\tThis probably means the server terminated abnormally\n"
-																	"\tbefore or while processing the request.\n"));
-																	break;
-
-																	default:
-																	appendPQExpBuffer(&conn->errorMessage,
-																	libpq_gettext("could not receive data from server: %s\n"),
-																	SOCK_STRERROR(result_errno,
-																	sebuf, sizeof(sebuf)));
-																	break;
-																	}
-																	}
-
-*//* ensure we return the intended errno to caller *//*
-														SOCK_ERRNO_SET(result_errno);
-
-														return n;
-
-*/
-				// this one calls recv - the read() in whe while loop just reads from the
-				// internal buffer.
-				err = rustls_connection_read_tls(conn->rustls_conn, read_cb, conn, &nbytes);
-			result_errno = SOCK_ERRNO;
-			SOCK_ERRNO_SET(result_errno);
-			if (nbytes < 0) {
-				if (err == EAGAIN || err == EWOULDBLOCK) {
-					/* no error message, caller is expected to retry */
-					fprintf(stderr, "got EAGAIN or EWOULDBLOCK (%d), returning 0 bytes read\n", err);
-					n = 0;
-					return n;
-				} else if(err != 0) {
-					fprintf(stderr, "pgtls_read reading from socket: errno %d\n", err);
-					return (ssize_t) n;
-				}
-			}
-			result = rustls_connection_process_new_packets(conn->rustls_conn);
-			if(result != RUSTLS_RESULT_OK) {
-				fprintf(stderr, "processing new packets: result %d\n", result);
-				return (ssize_t) n;
-			}
-
-			while (plain_bytes_copied < len) {
-				result = rustls_connection_read(conn->rustls_conn, (uint8_t *)ptr + n,
-						len - n, &nbytes);
-				fprintf(stderr, "rustls_connection_read: read %ld bytes, result %d\n", nbytes, result);
-				if(result == RUSTLS_RESULT_ALERT_CLOSE_NOTIFY) {
-					fprintf(stderr, "Received close_notify, cleanly ending connection\n");
-					return 0;
-				} else if (result != RUSTLS_RESULT_OK) {
-					fprintf(stderr, "Error in rustls_connection_read: %d\n", result);
-					return plain_bytes_copied;
-				} else if (nbytes == 0) {
-					// This is expected. It just means "no more bytes for now."
-					break;
-				} else {
-					plain_bytes_copied += nbytes;
-					nbytes = 0;
-				}
-			}
-
-			SOCK_ERRNO_SET(read_errno);
+			errorbuf[errorsize+1] = '\0';
+			fprintf(stderr, "could not read tls err: %s\n", errorbuf);
+			appendPQExpBuffer(&conn->errorMessage,
+					libpq_gettext("could not read TLS: %s\n"),
+					&errorbuf);
 			return plain_bytes_copied;
+		} else if (nbytes == 0) {
+			// This is expected. It just means "no more bytes for now."
+			break;
+		} else {
+			plain_bytes_copied += nbytes;
+			nbytes = 0;
+		}
+	}
+
+	SOCK_ERRNO_SET(read_errno);
+	return plain_bytes_copied;
 }
 
 	int
