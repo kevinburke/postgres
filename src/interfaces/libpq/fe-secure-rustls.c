@@ -28,6 +28,12 @@ read_cb(void *userdata, uint8_t *buf, uintptr_t len, uintptr_t *out_n);
 int
 write_cb(void *userdata, const uint8_t *buf, uintptr_t len, uintptr_t *out_n);
 
+void
+set_tls_versions(rustls_client_config_builder *config_builder, uint16_t min, uint16_t max);
+
+uint16_t
+pg_version_to_rustls_version(char * pg_version);
+
 #ifdef ENABLE_THREAD_SAFETY
 #ifndef WIN32
 static pthread_mutex_t ssl_config_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -36,6 +42,16 @@ static pthread_mutex_t ssl_config_mutex = NULL;
 static long win32_ssl_create_mutex = 0;
 #endif
 #endif							/* ENABLE_THREAD_SAFETY */
+
+const uint16_t all_tls_versions[6] = {
+	RUSTLS_TLS_VERSION_SSLV2,
+	RUSTLS_TLS_VERSION_SSLV3,
+	RUSTLS_TLS_VERSION_TLSV1_0,
+	RUSTLS_TLS_VERSION_TLSV1_1,
+	RUSTLS_TLS_VERSION_TLSV1_2,
+	RUSTLS_TLS_VERSION_TLSV1_3,
+};
+
 /* ------------------------------------------------------------ */
 /*			 Procedures common to all secure sessions			*/
 /* ------------------------------------------------------------ */
@@ -43,7 +59,7 @@ static long win32_ssl_create_mutex = 0;
 /*
  * pgtls_init_library
  */
-	void
+void
 pgtls_init_library(bool do_ssl, int do_crypto)
 {
 	/* noop */
@@ -73,6 +89,55 @@ pgtls_close(PGconn *conn)
 	}
 }
 
+void
+set_tls_versions(rustls_client_config_builder *config_builder, uint16_t min, uint16_t max)
+{
+	int length = 0;
+	uint16_t *res;
+	int iter = 0;
+	const int all_tls_versions_length = 6;
+	for (int i = 0; i < all_tls_versions_length; i++)
+	{
+		if (min <= all_tls_versions[i] && all_tls_versions[i] <= max)
+		{
+			length++;
+		}
+	}
+	res = malloc(sizeof(uint16_t)*length);
+	for (int i = 0; i < all_tls_versions_length; i++)
+	{
+		if (min <= all_tls_versions[i] && all_tls_versions[i] <= max)
+		{
+			res[iter] = all_tls_versions[i];
+			iter++;
+		}
+	}
+	rustls_client_config_builder_set_versions(config_builder, res, length);
+	free(res);
+}
+
+uint16_t
+pg_version_to_rustls_version(char * pg_version)
+{
+	if(strcmp(pg_version, "TLSv1") == 0)
+	{
+			return RUSTLS_TLS_VERSION_TLSV1_0;
+	}
+	else if (strcmp(pg_version, "TLSv1.1") == 0)
+	{
+		return RUSTLS_TLS_VERSION_TLSV1_1;
+	}
+	else if (strcmp(pg_version, "TLSv1.2") == 0)
+	{
+		return RUSTLS_TLS_VERSION_TLSV1_2;
+	}
+	else if (strcmp(pg_version, "TLSv1.3") == 0)
+	{
+		return RUSTLS_TLS_VERSION_TLSV1_3;
+	}
+	return 0;
+}
+
 PostgresPollingStatusType
 pgtls_open_client(PGconn *conn)
 {
@@ -88,6 +153,10 @@ pgtls_open_client(PGconn *conn)
 	rustls_io_result io_error;
 	struct rustls_client_config_builder *config_builder;
 	const struct rustls_client_config *client_config = NULL;
+	rustls_tls_version min_ssl_version = RUSTLS_TLS_VERSION_TLSV1_2;
+	// see https://github.com/rustls/rustls-ffi/issues/146
+	rustls_tls_version max_ssl_version = RUSTLS_TLS_VERSION_TLSV1_3;
+	bool user_specified_tls_versions = false;
 
 #ifdef ENABLE_THREAD_SAFETY
 	if (pthread_mutex_lock(&ssl_config_mutex))
@@ -108,15 +177,43 @@ pgtls_open_client(PGconn *conn)
 			errorbuf[n+1] = '\0';
 			appendPQExpBuffer(&conn->errorMessage,
 					libpq_gettext("could not load certificates from file %s: %s\n"),
-					conn->sslrootcert, &errorbuf);
+					conn->sslrootcert, errorbuf);
+
 			rustls_client_config_free(
 					rustls_client_config_builder_build(config_builder));
 			return PGRES_POLLING_FAILED;
 		}
 	}
+	if (conn->ssl_min_protocol_version && strlen(conn->ssl_min_protocol_version) > 0)
+	{
+		min_ssl_version = pg_version_to_rustls_version(conn->ssl_min_protocol_version);
+		if (min_ssl_version == 0) {
+			appendPQExpBuffer(&conn->errorMessage,
+					libpq_gettext("unsupported or unknown minimum TLS version %s\n"),
+					conn->ssl_min_protocol_version);
+			return PGRES_POLLING_FAILED;
+		}
+		user_specified_tls_versions = true;
+	}
+	if (conn->ssl_max_protocol_version && strlen(conn->ssl_max_protocol_version) > 0)
+	{
+		max_ssl_version = pg_version_to_rustls_version(conn->ssl_max_protocol_version);
+		if (max_ssl_version == 0) {
+			appendPQExpBuffer(&conn->errorMessage,
+					libpq_gettext("unsupported or unknown maximum TLS version %s\n"),
+					conn->ssl_max_protocol_version);
+			return PGRES_POLLING_FAILED;
+		}
+		user_specified_tls_versions = true;
+	}
+	if (user_specified_tls_versions)
+	{
+		set_tls_versions(config_builder, min_ssl_version, max_ssl_version);
+	}
+
 	// TODO load system certs here, or other certs per the initialization
 	// settings.
-	// rust sets ALPN here but I don't think that's a thing that Postgres does.
+	// rust sets ALPN here, but I don't think that's a thing that Postgres does.
 	client_config = rustls_client_config_builder_build(config_builder);
 
 	result = rustls_client_connection_new(client_config, conn->connhost[conn->whichhost].host, &rconn);
@@ -126,7 +223,6 @@ pgtls_open_client(PGconn *conn)
 		char buf[256];
 		size_t n;
 		rustls_error(result, buf, sizeof(buf), &n);
-		fprintf(stderr, "could not create connection/handshake: %.*s\n", (int)n, buf);
 		return PGRES_POLLING_FAILED;
 	}
 
@@ -238,7 +334,7 @@ pgtls_read(PGconn *conn, void *ptr, size_t len)
 		errorbuf[errorsize+1] = '\0';
 		appendPQExpBuffer(&conn->errorMessage,
 				libpq_gettext("could not process packets: %s\n"),
-				&errorbuf);
+				errorbuf);
 		return (ssize_t) n;
 	}
 
@@ -256,7 +352,7 @@ pgtls_read(PGconn *conn, void *ptr, size_t len)
 			fprintf(stderr, "could not read tls err: %s\n", errorbuf);
 			appendPQExpBuffer(&conn->errorMessage,
 					libpq_gettext("could not read TLS: %s\n"),
-					&errorbuf);
+					errorbuf);
 			return plain_bytes_copied;
 		} else if (nbytes == 0) {
 			// This is expected. It just means "no more bytes for now."
