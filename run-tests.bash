@@ -25,6 +25,9 @@ main() {
     make
     sudo make install
     make check
+    pushd src/test/ssl
+        make check
+    popd
 }
 
 main "$@"
