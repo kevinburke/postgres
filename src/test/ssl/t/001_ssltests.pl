@@ -13,6 +13,8 @@ use lib $FindBin::RealBin;
 
 use SSL::Server;
 
+note "starting the test runner";
+
 my $openssl;
 my $nss;
 
