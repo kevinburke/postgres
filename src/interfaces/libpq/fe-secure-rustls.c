@@ -93,9 +93,9 @@ pgtls_close(PGconn *conn)
 uint16_t*
 get_tls_versions(uint16_t min, uint16_t max, uint16_t *tls_versions_length)
 {
-	uint16_t length = 0;
 	uint16_t *res;
 	int iter = 0;
+	uint16_t length = 0;
 	for (int i = 0; i < all_tls_versions_length; i++)
 	{
 		if (min <= all_tls_versions[i] && all_tls_versions[i] <= max)
@@ -172,23 +172,7 @@ pgtls_open_client(PGconn *conn)
 #endif
 
 	config_builder = rustls_client_config_builder_new_with_safe_defaults();
-	if (conn->sslrootcert && strlen(conn->sslrootcert) > 0)
-	{
-		result = rustls_client_config_builder_load_roots_from_file(
-				config_builder, conn->sslrootcert, &config_builder2);
-		if (result != RUSTLS_RESULT_OK)
-		{
-			rustls_error(result, errorbuf, sizeof(errorbuf), &n);
-			errorbuf[n+1] = '\0';
-			appendPQExpBuffer(&conn->errorMessage,
-					libpq_gettext("could not load certificates from file %s: %s\n"),
-					conn->sslrootcert, errorbuf);
 
-			rustls_client_config_free(
-					rustls_client_config_builder_build(config_builder2));
-			return PGRES_POLLING_FAILED;
-		}
-	}
 	if (conn->ssl_min_protocol_version && strlen(conn->ssl_min_protocol_version) > 0)
 	{
 		min_ssl_version = pg_version_to_rustls_version(conn->ssl_min_protocol_version);
@@ -243,8 +227,29 @@ pgtls_open_client(PGconn *conn)
 		return PGRES_POLLING_FAILED;
 	}
 
-	// TODO load system certs here, or other certs per the initialization
-	// settings.
+	if (conn->sslrootcert && strlen(conn->sslrootcert) > 0)
+	{
+		result = rustls_client_config_builder_load_roots_from_file(
+				config_builder, conn->sslrootcert, &config_builder2);
+		if (result != RUSTLS_RESULT_OK)
+		{
+			rustls_error(result, errorbuf, sizeof(errorbuf), &n);
+			errorbuf[n+1] = '\0';
+			appendPQExpBuffer(&conn->errorMessage,
+					libpq_gettext("could not load certificates from file %s: %s\n"),
+					conn->sslrootcert, errorbuf);
+
+			rustls_client_config_free(
+					rustls_client_config_builder_build(config_builder2));
+			return PGRES_POLLING_FAILED;
+		}
+	}
+	else
+	{
+		// TODO load system certs here, or other certs per the initialization
+		// settings.
+	}
+
 	// rust sets ALPN here, but I don't think that's a thing that Postgres does.
 	client_config = rustls_client_config_builder_build(config_builder2);
 
