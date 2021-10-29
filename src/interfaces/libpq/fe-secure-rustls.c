@@ -255,7 +255,8 @@ pgtls_open_client(PGconn *conn)
 
 	result = rustls_client_connection_new(client_config, conn->connhost[conn->whichhost].host, &rconn);
 	rustls_client_config_free(client_config);
-	if(result != RUSTLS_RESULT_OK) {
+	if (result != RUSTLS_RESULT_OK)
+	{
 		// TODO log error here.
 		char buf[256];
 		size_t n;
@@ -269,7 +270,8 @@ pgtls_open_client(PGconn *conn)
 #endif
 
 	/* Read/write data until the handshake is done or the socket would block. */
-	for(;;) {
+	for (;;)
+	{
 		/*
 		 * Connection has been established according to rustls. Set send/recv
 		 * handlers, and update the state machine.
@@ -277,7 +279,8 @@ pgtls_open_client(PGconn *conn)
 		 * then becomes true when we first write data, then becomes false again
 		 * once the handshake is done.
 		 */
-		if(!rustls_connection_is_handshaking(rconn)) {
+		if (!rustls_connection_is_handshaking(rconn))
+		{
 			conn->rustls_conn = rconn;
 			conn->ssl_in_use = true;
 
@@ -288,19 +291,25 @@ pgtls_open_client(PGconn *conn)
 		wants_write = rustls_connection_wants_write(rconn);
 
 		/* socket is readable or writable */
-		if(wants_write) {
+		if (wants_write)
+		{
 			fprintf(stderr, "rustls_connection wants us to write_tls.\n");
-			while(rustls_connection_wants_write(rconn)) {
+			while (rustls_connection_wants_write(rconn))
+			{
 				io_error = rustls_connection_write_tls(rconn, write_cb,
 						conn, &tlswritten);
-				if(io_error == EAGAIN || io_error == EWOULDBLOCK) {
+				if (io_error == EAGAIN || io_error == EWOULDBLOCK)
+				{
 					continue;
-				} else if(io_error) {
+				}
+				else if (io_error)
+				{
 					fprintf(stderr, "got io_error %d\n", io_error);
 					rustls_connection_free(rconn);
 					return PGRES_POLLING_FAILED;
 				}
-				if(tlswritten == 0) {
+				if (tlswritten == 0)
+				{
 					fprintf(stderr, "EOF in swrite\n");
 					rustls_connection_free(rconn);
 					return PGRES_POLLING_FAILED;
@@ -313,15 +322,19 @@ pgtls_open_client(PGconn *conn)
 			fprintf(stderr, "rustls_connection wants us to read_tls.\n");
 
 			io_error = rustls_connection_read_tls(rconn, read_cb, conn, &tls_bytes_read);
-			if(io_error == EAGAIN) {
+			if(io_error == EAGAIN)
+			{
 				fprintf(stderr, "sread: EAGAIN or EWOULDBLOCK\n");
-			} else if(io_error) {
+			}
+			else if(io_error)
+			{
 				fprintf(stderr, "got io_error %d\n", io_error);
 				rustls_connection_free(rconn);
 				return PGRES_POLLING_FAILED;
 			}
 			rresult = rustls_connection_process_new_packets(rconn);
-			if(rresult != RUSTLS_RESULT_OK) {
+			if(rresult != RUSTLS_RESULT_OK)
+			{
 				fprintf(stderr, "error processing new packets: %d\n", rresult);
 				rustls_connection_free(rconn);
 				return PGRES_POLLING_FAILED;
@@ -354,19 +367,24 @@ pgtls_read(PGconn *conn, void *ptr, size_t len)
 	err = rustls_connection_read_tls(conn->rustls_conn, read_cb, conn, &nbytes);
 	result_errno = SOCK_ERRNO;
 	SOCK_ERRNO_SET(result_errno);
-	if (nbytes < 0) {
-		if (err == EAGAIN || err == EWOULDBLOCK) {
+	if (nbytes < 0)
+	{
+		if (err == EAGAIN || err == EWOULDBLOCK)
+		{
 			/* no error message, caller is expected to retry */
 			fprintf(stderr, "got EAGAIN or EWOULDBLOCK (%d), returning 0 bytes read\n", err);
 			n = 0;
 			return n;
-		} else if(err != 0) {
+		}
+		else if(err != 0)
+		{
 			fprintf(stderr, "pgtls_read reading from socket: errno %d\n", err);
 			return (ssize_t) n;
 		}
 	}
 	result = rustls_connection_process_new_packets(conn->rustls_conn);
-	if(result != RUSTLS_RESULT_OK) {
+	if(result != RUSTLS_RESULT_OK)
+	{
 		rustls_error(result, errorbuf, sizeof(errorbuf), &errorsize);
 		errorbuf[errorsize+1] = '\0';
 		appendPQExpBuffer(&conn->errorMessage,
@@ -375,7 +393,8 @@ pgtls_read(PGconn *conn, void *ptr, size_t len)
 		return (ssize_t) n;
 	}
 
-	while (plain_bytes_copied < len) {
+	while (plain_bytes_copied < len)
+	{
 		result = rustls_connection_read(conn->rustls_conn, (uint8_t *)ptr + n,
 				len - n, &nbytes);
 		fprintf(stderr, "rustls_connection_read: read %ld bytes, result %d\n", nbytes, result);
@@ -404,7 +423,7 @@ pgtls_read(PGconn *conn, void *ptr, size_t len)
 	return plain_bytes_copied;
 }
 
-	int
+int
 read_cb(void *userdata, unsigned char *buf, size_t len, size_t *out_n)
 {
 	int n = 0;
@@ -491,7 +510,7 @@ pgtls_write(PGconn *conn, const void *ptr, size_t len)
 	return plainwritten;
 }
 
-	int
+int
 write_cb(void *userdata, const unsigned char *buf, size_t len, size_t *out_n)
 {
 	ssize_t n = 0;
@@ -610,15 +629,15 @@ PQsslAttribute(PGconn *conn, const char *attribute_name)
 	}
 
 	if (strcmp(attribute_name, "cipher") == 0) {
-        // https://github.com/rustls/rustls/issues/822
-        // https://github.com/rustls/rustls-ffi/issues/143
-        return pstrdup("unknown");
-    }
+		// https://github.com/rustls/rustls/issues/822
+		// https://github.com/rustls/rustls-ffi/issues/143
+		return pstrdup("unknown");
+	}
 
-    // rustls does not support compression
+	// rustls does not support compression
 	if (strcmp(attribute_name, "compression") == 0) {
 		return "off";
-    }
+	}
 
 	return NULL;
 }
