@@ -109,7 +109,7 @@ SHLIB_EXPORTS = exports.txt
 
 PKG_CONFIG_REQUIRES_PRIVATE = libssl libcrypto
 
-all: all-lib libpq-refs-stamp
+all: all-lib
 
 # Shared library stuff
 include $(top_srcdir)/src/Makefile.shlib
