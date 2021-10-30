@@ -1,7 +1,8 @@
 /*-------------------------------------------------------------------------
  *
  * fe-secure-rustls.c
- *	  functions for supporting NSS as a TLS backend for frontend libpq
+ *	  functions for supporting Rustls (https://github.com/rustls/rustls) as a
+ *	  TLS backend for frontend libpq
  *
  * Portions Copyright (c) 1996-2021, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
@@ -119,7 +120,7 @@ get_tls_versions(uint16_t min, uint16_t max, uint16_t *tls_versions_length)
 uint16_t
 pg_version_to_rustls_version(char * pg_version)
 {
-	if(strcmp(pg_version, "TLSv1") == 0)
+	if (strcmp(pg_version, "TLSv1") == 0)
 	{
 			return RUSTLS_TLS_VERSION_TLSV1_0;
 	}
@@ -571,7 +572,8 @@ PQsslStruct(PGconn *conn, const char *struct_name)
 	if (!conn)
 		return NULL;
 
-	if (strcmp(struct_name, "rustls") == 0) {
+	if (strcmp(struct_name, "rustls") == 0)
+	{
 		return conn->rustls_conn;
 	}
 	return NULL;
@@ -603,7 +605,8 @@ PQsslAttribute(PGconn *conn, const char *attribute_name)
 	if (!conn || !conn->rustls_conn)
 		return NULL;
 
-	if (strcmp(attribute_name, "library") == 0) {
+	if (strcmp(attribute_name, "library") == 0)
+	{
 		return "rustls";
     }
 
@@ -628,14 +631,16 @@ PQsslAttribute(PGconn *conn, const char *attribute_name)
 		return pstrdup("unknown");
 	}
 
-	if (strcmp(attribute_name, "cipher") == 0) {
+	if (strcmp(attribute_name, "cipher") == 0)
+	{
 		// https://github.com/rustls/rustls/issues/822
 		// https://github.com/rustls/rustls-ffi/issues/143
 		return pstrdup("unknown");
 	}
 
 	// rustls does not support compression
-	if (strcmp(attribute_name, "compression") == 0) {
+	if (strcmp(attribute_name, "compression") == 0)
+	{
 		return "off";
 	}
 
