@@ -396,8 +396,8 @@ pgtls_read(PGconn *conn, void *ptr, size_t len)
 
 	while (plain_bytes_copied < len)
 	{
-		result = rustls_connection_read(conn->rustls_conn, (uint8_t *)ptr + n,
-				len - n, &nbytes);
+		result = rustls_connection_read(conn->rustls_conn, (uint8_t *)ptr + nbytes,
+				len - nbytes, &nbytes);
 		fprintf(stderr, "rustls_connection_read: read %ld bytes, result %d\n", nbytes, result);
 		if(result == RUSTLS_RESULT_ALERT_CLOSE_NOTIFY) {
 			fprintf(stderr, "Received close_notify, cleanly ending connection\n");
